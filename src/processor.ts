@@ -74,6 +74,44 @@ function readBillFile(filePath: string): BillInput {
 }
 
 /**
+ * 異步讀取並解析 JSON 檔案（加分功能 +5分）
+ * @param filePath 檔案路徑
+ * @returns 解析後的帳單資料
+ */
+async function readBillFileAsync(filePath: string): Promise<BillInput> {
+  try {
+    // 檢查檔案是否存在
+    const exists = await fsPromises.access(filePath).then(() => true).catch(() => false)
+    if (!exists) {
+      throw new Error(`檔案不存在: ${filePath}`)
+    }
+
+    // 讀取檔案內容
+    const fileContent = await fsPromises.readFile(filePath, 'utf-8')
+    
+    // 解析 JSON
+    const billData = JSON.parse(fileContent) as BillInput
+    
+    // 基本格式驗證
+    if (!billData.date || !billData.location || !billData.items || !Array.isArray(billData.items)) {
+      throw new Error('JSON 格式錯誤：缺少必要欄位 (date, location, items)')
+    }
+
+    console.log(`✅ 成功讀取檔案: ${filePath}`)
+    console.log(`   日期: ${billData.date}`)
+    console.log(`   地點: ${billData.location}`)
+    console.log(`   項目數量: ${billData.items.length}`)
+
+    return billData
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`JSON 格式錯誤: ${error.message}`)
+    }
+    throw error
+  }
+}
+
+/**
  * 格式化文字輸出
  * @param result 計算結果
  * @returns 格式化的文字字串
@@ -126,6 +164,99 @@ function writeResultFile(filePath: string, result: BillOutput, format: string): 
 }
 
 /**
+ * 檢查是否為目錄
+ * @param dirPath 路徑
+ * @returns 是否為目錄
+ */
+function isDirectory(dirPath: string): boolean {
+  try {
+    return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 處理單一檔案
+ * @param inputPath 輸入檔案路徑
+ * @param outputPath 輸出檔案路徑
+ * @param format 輸出格式
+ */
+function processSingleFile(inputPath: string, outputPath: string, format: string): void {
+  console.log(`📄 處理檔案: ${inputPath}`)
+  
+  // 讀取並解析輸入檔案
+  const billData = readBillFile(inputPath)
+  
+  // 使用核心函數計算分帳結果
+  const result = splitBill(billData)
+  
+  // 寫入結果檔案
+  writeResultFile(outputPath, result, format)
+}
+
+/**
+ * 批次處理目錄中的所有 JSON 檔案（加分功能 +10分）
+ * @param inputDir 輸入目錄
+ * @param outputDir 輸出目錄
+ * @param format 輸出格式
+ */
+function processBatchFiles(inputDir: string, outputDir: string, format: string): void {
+  console.log(`📁 批次處理目錄: ${inputDir}`)
+  
+  // 確保輸出目錄存在
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true })
+    console.log(`📂 已建立輸出目錄: ${outputDir}`)
+  }
+  
+  // 讀取目錄中的所有檔案
+  const files = fs.readdirSync(inputDir)
+  
+  // 過濾出 JSON 檔案
+  const jsonFiles = files.filter(file => file.toLowerCase().endsWith('.json'))
+  
+  if (jsonFiles.length === 0) {
+    console.log('⚠️  警告：目錄中沒有找到 JSON 檔案')
+    return
+  }
+  
+  console.log(`📋 找到 ${jsonFiles.length} 個 JSON 檔案，跳過 ${files.length - jsonFiles.length} 個非 JSON 檔案`)
+  
+  let successCount = 0
+  let errorCount = 0
+  
+  // 處理每個 JSON 檔案
+  for (const jsonFile of jsonFiles) {
+    try {
+      const inputPath = path.join(inputDir, jsonFile)
+      
+      // 生成輸出檔案名稱：原檔名-result.擴展名
+      const baseName = path.parse(jsonFile).name
+      const extension = format === 'text' ? 'txt' : 'json'
+      const outputFileName = `${baseName}-result.${extension}`
+      const outputPath = path.join(outputDir, outputFileName)
+      
+      console.log(``)
+      // 處理單一檔案
+      processSingleFile(inputPath, outputPath, format)
+      successCount++
+      
+    } catch (error) {
+      console.error(`❌ 處理檔案 ${jsonFile} 時發生錯誤: ${error instanceof Error ? error.message : String(error)}`)
+      errorCount++
+      // 繼續處理下一個檔案，不要停止整個批次處理
+    }
+  }
+  
+  console.log(``)
+  console.log(`📊 批次處理結果：`)
+  console.log(`   ✅ 成功處理: ${successCount} 個檔案`)
+  console.log(`   ❌ 處理失敗: ${errorCount} 個檔案`)
+  console.log(`🎉 批次處理完成！`)
+}
+
+/**
  * 主程式入口點
  * @param args 命令列參數陣列
  * @description 解析命令列參數並執行相應的處理邏輯，支援單一檔案和批次處理模式
@@ -141,24 +272,41 @@ export function main(args: string[]): void {
     console.log(`   格式: ${format}`)
     console.log('')
     
-    // 讀取並解析輸入檔案
-    const billData = readBillFile(input)
-    console.log('')
-    
-    // 使用核心函數計算分帳結果
-    console.log(`🧮 開始計算分帳...`)
-    const result = splitBill(billData)
-    console.log(`✅ 計算完成！`)
-    console.log(`   小計: $${result.subTotal}`)
-    console.log(`   小費: $${result.tip}`)
-    console.log(`   總金額: $${result.totalAmount}`)
-    console.log(`   分帳人數: ${result.items.length}`)
-    console.log('')
-    
-    // 寫入結果檔案
-    writeResultFile(output, result, format)
-    console.log('')
-    console.log(`🎉 處理完成！`)
+    // 判斷是單一檔案處理還是批次處理
+    if (isDirectory(input)) {
+      // 批次處理模式
+      console.log(`🔍 偵測到輸入為目錄，啟用批次處理模式`)
+      
+      // 檢查輸出是否也是目錄
+      if (!isDirectory(output) && !output.endsWith('/') && !output.endsWith('\\')) {
+        throw new Error('批次處理模式下，輸出路徑必須是目錄')
+      }
+      
+      processBatchFiles(input, output, format)
+    } else {
+      // 單一檔案處理模式
+      console.log(`🔍 偵測到輸入為檔案，啟用單一檔案處理模式`)
+      console.log('')
+      
+      // 讀取並解析輸入檔案
+      const billData = readBillFile(input)
+      console.log('')
+      
+      // 使用核心函數計算分帳結果
+      console.log(`🧮 開始計算分帳...`)
+      const result = splitBill(billData)
+      console.log(`✅ 計算完成！`)
+      console.log(`   小計: $${result.subTotal}`)
+      console.log(`   小費: $${result.tip}`)
+      console.log(`   總金額: $${result.totalAmount}`)
+      console.log(`   分帳人數: ${result.items.length}`)
+      console.log('')
+      
+      // 寫入結果檔案
+      writeResultFile(output, result, format)
+      console.log('')
+      console.log(`🎉 處理完成！`)
+    }
     
   } catch (error) {
     console.error(`❌ 錯誤: ${error instanceof Error ? error.message : String(error)}`)
