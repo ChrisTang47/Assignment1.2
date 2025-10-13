@@ -74,6 +74,58 @@ function readBillFile(filePath: string): BillInput {
 }
 
 /**
+ * 格式化文字輸出
+ * @param result 計算結果
+ * @returns 格式化的文字字串
+ */
+function formatTextOutput(result: BillOutput): string {
+  let output = '===== 聚餐分帳結果 =====\n'
+  output += `日期：${result.date}\n`
+  output += `地點：${result.location}\n\n`
+  
+  output += `小結：$${result.subTotal.toFixed(1)}\n`
+  output += `小費：$${result.tip.toFixed(1)}\n`
+  output += `總金額：$${result.totalAmount.toFixed(1)}\n\n`
+  
+  output += '分帳結果：\n'
+  result.items.forEach((item, index) => {
+    output += `${index + 1}. ${item.name} 應付：$${item.amount.toFixed(1)}\n`
+  })
+  
+  return output
+}
+
+/**
+ * 將結果寫入檔案
+ * @param filePath 輸出檔案路徑
+ * @param result 計算結果
+ * @param format 輸出格式 ('json' 或 'text')
+ */
+function writeResultFile(filePath: string, result: BillOutput, format: string): void {
+  try {
+    // 確保輸出目錄存在
+    const outputDir = path.dirname(filePath)
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true })
+    }
+
+    let content: string
+    if (format === 'text') {
+      content = formatTextOutput(result)
+    } else {
+      content = JSON.stringify(result, null, 2)
+    }
+
+    fs.writeFileSync(filePath, content, 'utf-8')
+    console.log(`💾 結果已成功寫入: ${filePath}`)
+    console.log(`   格式: ${format}`)
+    console.log(`   檔案大小: ${content.length} 字元`)
+  } catch (error) {
+    throw new Error(`寫入檔案失敗: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
  * 主程式入口點
  * @param args 命令列參數陣列
  * @description 解析命令列參數並執行相應的處理邏輯，支援單一檔案和批次處理模式
@@ -101,8 +153,12 @@ export function main(args: string[]): void {
     console.log(`   小費: $${result.tip}`)
     console.log(`   總金額: $${result.totalAmount}`)
     console.log(`   分帳人數: ${result.items.length}`)
+    console.log('')
     
-    // TODO: 接下來實現檔案輸出邏輯
+    // 寫入結果檔案
+    writeResultFile(output, result, format)
+    console.log('')
+    console.log(`🎉 處理完成！`)
     
   } catch (error) {
     console.error(`❌ 錯誤: ${error instanceof Error ? error.message : String(error)}`)
